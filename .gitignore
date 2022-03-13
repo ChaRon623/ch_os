@@ -1,0 +1,7 @@
+os/target
+os/usr/build/
+Cargo.lock
+.idea
+.vscode
+*.bak
+*.org
