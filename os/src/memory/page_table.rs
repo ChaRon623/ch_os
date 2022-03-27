@@ -51,6 +51,17 @@ impl PageTableEntry {
     pub fn is_valid(&self) -> bool {
         (self.flags() & PTEFlags::V) != PTEFlags::empty()
     }
+
+    pub fn readable(&self) -> bool {
+        (self.flags() & PTEFlags::R) != PTEFlags::empty()
+    }
+    pub fn writable(&self) -> bool {
+        (self.flags() & PTEFlags::W) != PTEFlags::empty()
+    }
+
+    pub fn executable(&self) -> bool {
+        (self.flags() & PTEFlags::X) != PTEFlags::empty()
+    }
 }
 
 //SV39多级页表是以节点为单位进行管理的，
@@ -156,5 +167,11 @@ impl PageTable {
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         //如果能够找到页表项，那么它会将页表项拷贝一份并返回，否则就返回一个 None
         self.find_pte(vpn).map(|pte| *pte)
+    }
+
+    //构造一个无符号64位无符号整数，使得其分页模式为SV39，
+    //且将当前多级页表的根节点所在的物理页号填充进去
+    pub fn token(&self) -> usize {
+        8usize << 60 | self.root_ppn.0
     }
 }

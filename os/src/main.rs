@@ -5,14 +5,13 @@
 
 use core::arch::global_asm;
 
-//use crate::{config::TRAMPOLINE, process::default_handlers::{def_dump_core, def_ignore, def_terminate_self}};
-
 global_asm!(include_str!("entry.asm"));
 
 //引入alloc库的依赖
 #[macro_use]
 extern crate alloc;
 extern crate bitflags;//Rust中常用比特标志位的crate 
+extern crate xmas_elf;
 
 #[macro_use]
 //mod sync;
@@ -21,6 +20,10 @@ mod lang_items;
 mod sbi;
 mod memory;
 mod config;
+
+//#[cfg(not(any(feature="board_qemu", feature="board_k210")))]
+//compile_error!("At least one of the board_* feature should be active!");
+
 
 fn clear_bss() {
     extern "C" {
