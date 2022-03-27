@@ -5,7 +5,7 @@ authors = ["Yifan Wu <shinbokuow@163.com>"]
 edition = "2018"
 
 [dependencies]
-#riscv = { path = "../vendor/riscv", features = ["inline-asm"] }
+riscv = { path = "../dependency/riscv", features = ["inline-asm"] }
 #添加crate依赖，以便直接使用已有的伙伴分配器实现
 buddy_system_allocator = "0.6"
 #比特标志位的crate 
