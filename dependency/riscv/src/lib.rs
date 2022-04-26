@@ -13,18 +13,16 @@
 //! - Interrupt manipulation mechanisms.
 //! - Wrappers around assembly instructions like `WFI`.
 
+
 #![no_std]
-#![cfg_attr(feature = "inline-asm", feature(asm))]
 #![cfg_attr(feature = "inline-asm", feature(asm_const))]
-
 extern crate bare_metal;
-extern crate bit_field;
-extern crate embedded_hal;
-
-pub mod asm;
-pub mod delay;
-pub mod interrupt;
-pub mod register;
-
 #[macro_use]
-mod macros;
+extern crate bitflags;
+extern crate bit_field;
+
+pub mod addr;
+pub mod asm;
+pub mod interrupt;
+pub mod paging;
+pub mod register;

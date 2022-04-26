@@ -20,10 +20,13 @@ pub enum Trap {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum Interrupt {
     UserSoft,
+    VirtualSupervisorSoft,
     SupervisorSoft,
     UserTimer,
+    VirtualSupervisorTimer,
     SupervisorTimer,
     UserExternal,
+    VirtualSupervisorExternal,
     SupervisorExternal,
     Unknown,
 }
@@ -39,29 +42,35 @@ pub enum Exception {
     StoreMisaligned,
     StoreFault,
     UserEnvCall,
+    VirtualSupervisorEnvCall,
     InstructionPageFault,
     LoadPageFault,
     StorePageFault,
+    InstructionGuestPageFault,
+    LoadGuestPageFault,
+    VirtualInstruction,
+    StoreGuestPageFault,
     Unknown,
 }
 
 impl Interrupt {
-    #[inline]
     pub fn from(nr: usize) -> Self {
         match nr {
             0 => Interrupt::UserSoft,
             1 => Interrupt::SupervisorSoft,
+            2 => Interrupt::VirtualSupervisorSoft,
             4 => Interrupt::UserTimer,
             5 => Interrupt::SupervisorTimer,
+            6 => Interrupt::VirtualSupervisorTimer,
             8 => Interrupt::UserExternal,
             9 => Interrupt::SupervisorExternal,
+            10 => Interrupt::VirtualSupervisorExternal,
             _ => Interrupt::Unknown,
         }
     }
 }
 
 impl Exception {
-    #[inline]
     pub fn from(nr: usize) -> Self {
         match nr {
             0 => Exception::InstructionMisaligned,
@@ -72,9 +81,14 @@ impl Exception {
             6 => Exception::StoreMisaligned,
             7 => Exception::StoreFault,
             8 => Exception::UserEnvCall,
+            10 => Exception::VirtualSupervisorEnvCall,
             12 => Exception::InstructionPageFault,
             13 => Exception::LoadPageFault,
             15 => Exception::StorePageFault,
+            20 => Exception::InstructionGuestPageFault,
+            21 => Exception::LoadGuestPageFault,
+            22 => Exception::VirtualInstruction,
+            23 => Exception::StoreGuestPageFault,
             _ => Exception::Unknown,
         }
     }
@@ -88,7 +102,6 @@ impl Scause {
     }
 
     /// Returns the code field
-    #[inline]
     pub fn code(&self) -> usize {
         let bit = 1 << (size_of::<usize>() * 8 - 1);
         self.bits & !bit
@@ -118,43 +131,3 @@ impl Scause {
 }
 
 read_csr_as!(Scause, 0x142, __read_scause);
-write_csr!(0x142, __write_scause);
-
-/// Writes the CSR
-#[inline]
-pub unsafe fn write(bits: usize) {
-    _write(bits)
-}
-
-/// Set supervisor cause register to corresponding cause.
-#[inline]
-pub unsafe fn set(cause: Trap) {
-    let bits = match cause {
-        Trap::Interrupt(i) => {
-            (match i {
-                Interrupt::UserSoft => 0,
-                Interrupt::SupervisorSoft => 1,
-                Interrupt::UserTimer => 4,
-                Interrupt::SupervisorTimer => 5,
-                Interrupt::UserExternal => 8,
-                Interrupt::SupervisorExternal => 9,
-                Interrupt::Unknown => panic!("unknown interrupt"),
-            } | (1 << (size_of::<usize>() * 8 - 1)))
-        } // interrupt bit is 1
-        Trap::Exception(e) => match e {
-            Exception::InstructionMisaligned => 0,
-            Exception::InstructionFault => 1,
-            Exception::IllegalInstruction => 2,
-            Exception::Breakpoint => 3,
-            Exception::LoadFault => 5,
-            Exception::StoreMisaligned => 6,
-            Exception::StoreFault => 7,
-            Exception::UserEnvCall => 8,
-            Exception::InstructionPageFault => 12,
-            Exception::LoadPageFault => 13,
-            Exception::StorePageFault => 15,
-            Exception::Unknown => panic!("unknown exception"),
-        }, // interrupt bit is 0
-    };
-    _write(bits);
-}

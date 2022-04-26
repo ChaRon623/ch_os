@@ -17,7 +17,7 @@ compile with older versions but that may change in any new patch release.
 
 ## License
 
-Copyright 2019-2022 [RISC-V team][team]
+Copyright 2019-2020 [RISC-V team][team]
 
 Permission to use, copy, modify, and/or distribute this software for any purpose
 with or without fee is hereby granted, provided that the above copyright notice
@@ -38,4 +38,4 @@ Conduct][CoC], the maintainer of this crate, the [RISC-V team][team], promises
 to intervene to uphold that code of conduct.
 
 [CoC]: CODE_OF_CONDUCT.md
-[team]: https://github.com/rust-embedded/wg#the-risc-v-team
+[team]: https://github.com/rust-embedded/wg#the-riscv-team

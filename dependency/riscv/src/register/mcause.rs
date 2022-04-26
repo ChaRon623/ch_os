@@ -49,7 +49,6 @@ pub enum Exception {
 }
 
 impl Interrupt {
-    #[inline]
     pub fn from(nr: usize) -> Self {
         match nr {
             0 => Interrupt::UserSoft,
@@ -67,7 +66,6 @@ impl Interrupt {
 }
 
 impl Exception {
-    #[inline]
     pub fn from(nr: usize) -> Self {
         match nr {
             0 => Exception::InstructionMisaligned,
@@ -96,7 +94,6 @@ impl Mcause {
     }
 
     /// Returns the code field
-    #[inline]
     pub fn code(&self) -> usize {
         match () {
             #[cfg(target_pointer_width = "32")]

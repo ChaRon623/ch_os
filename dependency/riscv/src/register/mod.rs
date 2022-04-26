@@ -5,10 +5,10 @@
 //! - cycleh
 //! - timeh
 //! - instreth
-//! - hpmcounter<3-31>h
+//! - hpmcounter[3-31]h
 //! - mcycleh
 //! - minstreth
-//! - mhpmcounter<3-31>h
+//! - mhpmcounter[3-31]h
 
 #[macro_use]
 mod macros;
@@ -30,21 +30,19 @@ pub mod utval;
 pub mod fcsr;
 
 // User Counter/Timers
-pub mod cycle;
-pub mod cycleh;
+// TODO: cycle[h], instret[h]
+pub mod time;
+#[rustfmt::skip] // long macro use
 mod hpmcounterx;
 pub use self::hpmcounterx::*;
-pub mod instret;
-pub mod instreth;
-pub mod time;
 pub mod timeh;
 
 // Supervisor Trap Setup
 // TODO: sedeleg, sideleg
-pub mod scounteren;
 pub mod sie;
 pub mod sstatus;
 pub mod stvec;
+// TODO: scounteren
 
 // Supervisor Trap Handling
 pub mod scause;
@@ -63,13 +61,13 @@ pub mod mimpid;
 pub mod mvendorid;
 
 // Machine Trap Setup
-pub mod mcounteren;
 pub mod medeleg;
 pub mod mideleg;
 pub mod mie;
 pub mod misa;
 pub mod mstatus;
 pub mod mtvec;
+// TODO: mcounteren
 
 // Machine Trap Handling
 pub mod mcause;
@@ -86,10 +84,11 @@ pub use self::pmpaddrx::*;
 
 // Machine Counter/Timers
 pub mod mcycle;
-pub mod mcycleh;
+#[rustfmt::skip] // long macro use
 mod mhpmcounterx;
-pub use self::mhpmcounterx::*;
 pub mod minstret;
+pub use self::mhpmcounterx::*;
+pub mod mcycleh;
 pub mod minstreth;
 
 // Machine Counter Setup
@@ -99,3 +98,7 @@ pub use self::mhpmeventx::*;
 // TODO: Debug/Trace Registers (shared with Debug Mode)
 
 // TODO: Debug Mode Registers
+
+// Hypervisor Extension Registers
+mod hypervisorx64;
+pub use self::hypervisorx64::*;

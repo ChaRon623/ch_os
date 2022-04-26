@@ -11,11 +11,9 @@ fn main() {
 
     if target.starts_with("riscv") && env::var_os("CARGO_FEATURE_INLINE_ASM").is_none() {
         let mut target = Target::from_target_str(&target);
-        target.retain_extensions("ifdc");
+        target.retain_extensions("ic");
 
         let target = target.to_string();
-        // capture riscvNNxxxxx only
-        let target = target.split("-").next().unwrap();
 
         fs::copy(
             format!("bin/{}.a", target),
@@ -27,10 +25,10 @@ fn main() {
         println!("cargo:rustc-link-search={}", out_dir.display());
     }
 
-    if target.starts_with("riscv32") {
+    if target.contains("riscv32") {
         println!("cargo:rustc-cfg=riscv");
         println!("cargo:rustc-cfg=riscv32");
-    } else if target.starts_with("riscv64") {
+    } else if target.contains("riscv64") {
         println!("cargo:rustc-cfg=riscv");
         println!("cargo:rustc-cfg=riscv64");
     }
