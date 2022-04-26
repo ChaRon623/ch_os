@@ -1,26 +1,16 @@
 use super::{frame_alloc, FrameTracker};
-use super::{PTEFlags};
-use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum,PageTable,PageTableEntry,};
-use super::{VPNRange};
-use crate::config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE};
+use super::{PTEFlags, PageTable, PageTableEntry};
+use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
+use super::{StepByOne, VPNRange};
+use crate::config::{MEMORY_END, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT, USER_STACK_SIZE};
+use crate::sync::UPSafeCell;
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 use alloc::sync::Arc;
 use core::arch::asm;
-use spin::Mutex;
 use lazy_static::*;
-use bitflags::*;
 use riscv::register::satp;
-use crate::memory::address::StepByOne;
-
-//创建内核地址空间的全局实例
-//KERNEL_SPACE 在运行期间它第一次被用到时才会实际进行初始化，
-//而它所占据的空间则是编译期被放在全局数据段中
-lazy_static! {
-    pub static ref KERNEL_SPACE: Arc<Mutex<MemorySet>> = Arc::new(unsafe {
-        Mutex::new(MemorySet::new_kernel()
-    )});
-}
+use crate::println;
 
 extern "C" {
     fn stext();
@@ -33,6 +23,14 @@ extern "C" {
     fn ebss();
     fn ekernel();
     fn strampoline();
+}
+
+//创建内核地址空间的全局实例
+//KERNEL_SPACE 在运行期间它第一次被用到时才会实际进行初始化，
+//而它所占据的空间则是编译期被放在全局数据段中
+lazy_static! {
+    pub static ref KERNEL_SPACE: Arc<UPSafeCell<MemorySet>> =
+        Arc::new(unsafe { UPSafeCell::new(MemorySet::new_kernel()) });
 }
 
 pub struct MapArea {
@@ -59,9 +57,13 @@ bitflags! {
     //控制该逻辑段的访问方式，它是页表项标志位 PTEFlags 的
     //一个子集，仅保留 U/R/W/X 四个标志位
     pub struct MapPermission: u8 {
+        ///Readable
         const R = 1 << 1;
+        ///Writable
         const W = 1 << 2;
+        ///Excutable
         const X = 1 << 3;
+        ///Accessible in U mode
         const U = 1 << 4;
     }
 }
@@ -93,6 +95,18 @@ impl MapArea {
             map_perm,
         }
     }
+
+    //从一个逻辑段复制得到一个虚拟地址区间、映射方式和权限控制均相同的逻辑段，不同的是
+    //由于它还没有真正被映射到物理页帧上，所以 data_frames 字段为空
+    pub fn from_another(another: &MapArea) -> Self {
+        Self {
+            vpn_range: VPNRange::new(another.vpn_range.get_start(), another.vpn_range.get_end()),
+            data_frames: BTreeMap::new(),
+            map_type: another.map_type,
+            map_perm: another.map_perm,
+        }
+    }
+
 
     //在虚拟页号 vpn 已经确定的情况下，它需要知道要将一个
     //怎么样的页表项插入多级页表
@@ -180,6 +194,11 @@ impl MemorySet {
         }
     }
 
+    ///Get pagetable `root_ppn`
+    pub fn token(&self) -> usize {
+        self.page_table.token()
+    }
+
     //在当前地址空间插入一个新的逻辑段，如果是以Framed方式映射到物理内存，
     //还可以可选地在那些被映射到的物理页帧上写入一些初始化数据data
     fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
@@ -191,6 +210,8 @@ impl MemorySet {
     }
 
     /// Mention that trampoline is not collected by areas.
+    //直接在多级页表中插入一个从地址空间的最高虚拟页面映射到跳板汇编代码
+    //所在的物理页帧的键值对，访问权限与代码段相同，即RX
     fn map_trampoline(&mut self) {
         self.page_table.map(
             VirtAddr::from(TRAMPOLINE).into(),
@@ -199,6 +220,19 @@ impl MemorySet {
         );
     }
     
+    ///Remove `MapArea` that starts with `start_vpn`
+    pub fn remove_area_with_start_vpn(&mut self, start_vpn: VirtPageNum) {
+        if let Some((idx, area)) = self
+            .areas
+            .iter_mut()
+            .enumerate()
+            .find(|(_, area)| area.vpn_range.get_start() == start_vpn)
+        {
+            area.unmap(&mut self.page_table);
+            self.areas.remove(idx);
+        }
+    }
+
     //在当前地址空间插入一个 Framed 方式映射到物理内存的逻辑段
     //需保证同一地址空间内的任意两个逻辑段不能存在交集
     //同时也需维护地址空间的多级页表page_table记录的虚拟页号到页表项
@@ -280,18 +314,6 @@ impl MemorySet {
             ),
             None,
         );
-        println!("mapping memory-mapped registers");
-        for pair in MMIO {
-            memory_set.push(
-                MapArea::new(
-                    (*pair).0.into(),
-                    ((*pair).0 + (*pair).1).into(),
-                    MapType::Identical,
-                    MapPermission::R | MapPermission::W,
-                ),
-                None,
-            );
-        }
         memory_set
     }
 
@@ -345,13 +367,58 @@ impl MemorySet {
         }
         //处理用户栈
         let max_end_va: VirtAddr = max_end_vpn.into();
-        let mut user_stack_base: usize = max_end_va.into();
-        user_stack_base += PAGE_SIZE;
+        let mut user_stack_bottom: usize = max_end_va.into();
+        // guard page
+        user_stack_bottom += PAGE_SIZE;
+        let user_stack_top = user_stack_bottom + USER_STACK_SIZE;
+        memory_set.push(
+            MapArea::new(
+                user_stack_bottom.into(),
+                user_stack_top.into(),
+                MapType::Framed,
+                MapPermission::R | MapPermission::W | MapPermission::U,
+            ),
+            None,
+        );
+        // map TrapContext
+        memory_set.push(
+            MapArea::new(
+                TRAP_CONTEXT.into(),
+                TRAMPOLINE.into(),
+                MapType::Framed,
+                MapPermission::R | MapPermission::W,
+            ),
+            None,
+        );
         (
             memory_set,
-            user_stack_base,
+            user_stack_top,
             elf.header.pt2.entry_point() as usize,
         )
+    }
+
+    //复制一个完全相同的地址空间
+    pub fn from_existed_user(user_space: &MemorySet) -> MemorySet {
+        //通过 new_bare 新创建一个空的地址空间
+        let mut memory_set = Self::new_bare();
+        //通过map_trampoline为这个地址空间映射上跳板页面，这是因为我们解析ELF创建地址空间的时候，
+        //并没有将跳板页作为一个单独的逻辑段插入到地址空间的逻辑段向量areas中
+        memory_set.map_trampoline();
+        //遍历原地址空间中的所有逻辑段，将复制之后的逻辑段插入新的地址空间，在插入的时候就已经实际分配了物理页帧了
+        for area in user_space.areas.iter() {
+            let new_area = MapArea::from_another(area);
+            memory_set.push(new_area, None);
+            //遍历逻辑段中的每个虚拟页面，对应完成数据复制，这只需要找出两个地址空间中的虚拟页面各被映射到哪个物理页帧，
+            //就可转化为将数据从物理内存中的一个位置复制到另一个位置，使用copy_from_slice即可轻松实现
+            for vpn in area.vpn_range {
+                let src_ppn = user_space.translate(vpn).unwrap().ppn();
+                let dst_ppn = memory_set.translate(vpn).unwrap().ppn();
+                dst_ppn
+                    .get_bytes_array()
+                    .copy_from_slice(src_ppn.get_bytes_array());
+            }
+        }
+        memory_set
     }
 
     //将无符号 64 位无符号整数写入当前CPU的satp CSR，从这一刻开始
@@ -363,26 +430,48 @@ impl MemorySet {
             asm!("sfence.vma");
         }
     }
+
+    pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
+        self.page_table.translate(vpn)
+    }
+
+    //将地址空间中的逻辑段列表 areas 清空（即执行 Vec 向量清空）
+    //导致应用地址空间被回收（即进程的数据和代码对应的物理页帧都被回收），
+    //但用来存放页表的那些物理页帧此时还不会被回收（会由父进程最后回收子进程剩余的占用资源）
+    pub fn recycle_data_pages(&mut self) {
+        //*self = Self::new_bare();
+        self.areas.clear();
+    }
 }
 
 //通过手动查内核多级页表的方式验证代码段和只读数据段不允许被写入，
 //同时不允许从数据段上取指执行
+#[allow(unused)]
 pub fn remap_test() {
-    let mut kernel_space = KERNEL_SPACE.lock();
+    let mut kernel_space = KERNEL_SPACE.exclusive_access();
     let mid_text: VirtAddr = ((stext as usize + etext as usize) / 2).into();
     let mid_rodata: VirtAddr = ((srodata as usize + erodata as usize) / 2).into();
     let mid_data: VirtAddr = ((sdata as usize + edata as usize) / 2).into();
-    assert_eq!(
-        kernel_space.page_table.translate(mid_text.floor()).unwrap().writable(),
-        false
+    assert!(
+        !kernel_space
+            .page_table
+            .translate(mid_text.floor())
+            .unwrap()
+            .writable(),
     );
-    assert_eq!(
-        kernel_space.page_table.translate(mid_rodata.floor()).unwrap().writable(),
-        false,
+    assert!(
+        !kernel_space
+            .page_table
+            .translate(mid_rodata.floor())
+            .unwrap()
+            .writable(),
     );
-    assert_eq!(
-        kernel_space.page_table.translate(mid_data.floor()).unwrap().executable(),
-        false,
+    assert!(
+        !kernel_space
+            .page_table
+            .translate(mid_data.floor())
+            .unwrap()
+            .executable(),
     );
     println!("remap_test passed!");
 }

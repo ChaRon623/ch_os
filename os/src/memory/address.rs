@@ -1,6 +1,5 @@
-//use super::PageTableEntry;
-use crate::memory::page_table::PageTableEntry;
-use crate::config::{PAGE_SIZE, PAGE_SIZE_BITS, PAGE_OFFSET};
+use super::PageTableEntry;
+use crate::config::{PAGE_SIZE, PAGE_SIZE_BITS};
 use core::fmt::{self, Debug, Formatter};
 
 //SV39支持的物理地址位宽为56位
@@ -10,19 +9,15 @@ const PPN_WIDTH_SV39: usize = PA_WIDTH_SV39 - PAGE_SIZE_BITS;
 const VA_WIDTH_SV39: usize = 39;
 const VPN_WIDTH_SV39: usize = VA_WIDTH_SV39 - PAGE_SIZE_BITS;
 
-#[repr(C)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct PhysAddr(pub usize);//物理地址
 
-#[repr(C)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct VirtAddr(pub usize);//虚拟地址
 
-#[repr(C)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct PhysPageNum(pub usize);//物理页号
 
-#[repr(C)]
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct VirtPageNum(pub usize);//虚拟页号
 
@@ -105,14 +100,14 @@ impl From<PhysPageNum> for PhysAddr {
 }
 
 impl From<VirtAddr> for VirtPageNum {
-    fn from(va: VirtAddr) -> Self {
-        return Self(va.0 >> PAGE_OFFSET);
+    fn from(v: VirtAddr) -> Self {
+        assert_eq!(v.page_offset(), 0);
+        v.floor()
     }
 }
-
 impl From<VirtPageNum> for VirtAddr {
-    fn from(vpn: VirtPageNum) -> Self {
-        return Self(vpn.0 << PAGE_OFFSET);
+    fn from(v: VirtPageNum) -> Self {
+        Self(v.0 << PAGE_SIZE_BITS)
     }
 }
 
@@ -128,6 +123,10 @@ impl PhysAddr {
     }
     pub fn ceil(&self) -> PhysPageNum {
         PhysPageNum((self.0 - 1 + PAGE_SIZE) / PAGE_SIZE)
+    }
+	///Check page aligned 
+    pub fn aligned(&self) -> bool {
+        self.page_offset() == 0
     }
 }
 
@@ -154,24 +153,18 @@ impl VirtAddr {
 impl PhysPageNum {
     //返回一个页表项定长数组的可变引用，代表多级页表中的一个节点
     pub fn get_pte_array(&self) -> &'static mut [PageTableEntry] {
-        let pa: PhysAddr = self.clone().into();
-        unsafe {
-            core::slice::from_raw_parts_mut(pa.0 as *mut PageTableEntry, 512)
-        }
+        let pa: PhysAddr = (*self).into();
+        unsafe { core::slice::from_raw_parts_mut(pa.0 as *mut PageTableEntry, 512) }
     }
     //返回一个字节数组的可变引用，可以以字节为粒度对物理页帧上的数据进行访问
     pub fn get_bytes_array(&self) -> &'static mut [u8] {
-        let pa: PhysAddr = self.clone().into();
-        unsafe {
-            core::slice::from_raw_parts_mut(pa.0 as *mut u8, 4096)
-        }
+        let pa: PhysAddr = (*self).into();
+        unsafe { core::slice::from_raw_parts_mut(pa.0 as *mut u8, 4096) }
     }
     //泛型函数，可以获取一个恰好放在一个物理页帧开头的类型为T的数据的可变引用
     pub fn get_mut<T>(&self) -> &'static mut T {
-        let pa: PhysAddr = self.clone().into();
-        unsafe {
-            (pa.0 as *mut T).as_mut().unwrap()
-        }
+        let pa: PhysAddr = (*self).into();
+        pa.get_mut()
     }
 }
 
@@ -185,6 +178,13 @@ impl VirtPageNum {
             vpn >>= 9;
         }
         idx
+    }
+}
+
+impl PhysAddr {
+    ///Get mutable reference to `PhysAddr` value 
+    pub fn get_mut<T>(&self) -> &'static mut T {
+        unsafe { (self.0 as *mut T).as_mut().unwrap() }
     }
 }
 

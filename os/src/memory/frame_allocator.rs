@@ -2,15 +2,25 @@ use super::{PhysAddr, PhysPageNum};
 use crate::config::MEMORY_END;
 use alloc::vec::Vec;
 use core::fmt::{self, Debug, Formatter};
-//use crate::sync::UPSafeCell;
+use crate::sync::UPSafeCell;
 use lazy_static::*;
-use spin::Mutex;
+use crate::println;
 
-//创建一个物理页帧管理器的实例，以物理页号为单位进行物理页帧的分配和回收。
-trait FrameAllocator {
-    fn new() -> Self;    
-    fn alloc(&mut self) -> Option<PhysPageNum>;
-    fn dealloc(&mut self, ppn: PhysPageNum);
+/// manage a frame which has the same lifecycle as the tracker
+pub struct FrameTracker {
+    pub ppn: PhysPageNum,
+}
+
+impl FrameTracker {
+    //由于这个物理页帧之前可能被分配过并用做其他用途，
+    //在这里直接将这个物理页帧上的所有字节清零
+    pub fn new(ppn: PhysPageNum) -> Self {
+        let bytes_array = ppn.get_bytes_array();
+        for i in bytes_array {
+            *i = 0;
+        }
+        Self { ppn }
+    }
 }
 
 impl Debug for FrameTracker {
@@ -19,11 +29,35 @@ impl Debug for FrameTracker {
     }
 }
 
+//当一个FrameTracker生命周期结束被编译器回收的时候，
+//需要将它控制的物理页帧回收到FRAME_ALLOCATOR中
+impl Drop for FrameTracker {
+    fn drop(&mut self) {
+        frame_dealloc(self.ppn);
+    }
+}
+
+//创建一个物理页帧管理器的实例，以物理页号为单位进行物理页帧的分配和回收。
+trait FrameAllocator {
+    fn new() -> Self;    
+    fn alloc(&mut self) -> Option<PhysPageNum>;
+    fn dealloc(&mut self, ppn: PhysPageNum);
+}
+
 //最简单的栈式物理页帧管理策略
 pub struct StackFrameAllocator {
     current: usize,  //空闲内存的起始物理页号
     end: usize,      //空闲内存use spin::Mutex;的结束物理页号
     recycled: Vec<usize>,//向量recycled以后入先出的方式保存了被回收的物理页
+}
+
+impl StackFrameAllocator {
+    //在使用之前需要调用init方法将自身的[current, end)初始化为可用物理页号区间
+    pub fn init(&mut self, l: PhysPageNum, r: PhysPageNum) {
+        self.current = l.0;
+        self.end = r.0;
+        println!("last {} Physical Frames.", self.end - self.current);
+    }
 }
 
 impl FrameAllocator for StackFrameAllocator {
@@ -68,27 +102,12 @@ impl FrameAllocator for StackFrameAllocator {
     }
 }
 
-impl StackFrameAllocator {
-    //在使用之前需要调用init方法将自身的[current, end)初始化为可用物理页号区间
-    pub fn init(&mut self, l: PhysPageNum, r: PhysPageNum) {
-        self.current = l.0;
-        self.end = r.0;
-    }
-}
-
 //使用UPSafeCell<T>来包裹栈式物理页帧分配器
 type FrameAllocatorImpl = StackFrameAllocator;
 lazy_static! {
     /// Lazy initialized instance of the frame allocator implementation. Currently using StackFrameAllocator.
-    pub static ref FRAME_ALLOCATOR: Mutex<StackFrameAllocator> = {
-        //debug!("Initializing page frame allocator...");
-        extern "C" {
-            fn ekernel();
-        }
-        let start = PhysAddr::from(ekernel as usize).ceil();
-        let stop = PhysAddr::from(MEMORY_END).floor();
-        Mutex::new(StackFrameAllocator::new())
-    };
+    pub static ref FRAME_ALLOCATOR: UPSafeCell<FrameAllocatorImpl> =
+    unsafe { UPSafeCell::new(FrameAllocatorImpl::new()) };
 }
 
 //将物理页帧全局管理器FRAME_ALLOCATOR初始化
@@ -98,7 +117,7 @@ pub fn init_frame_allocator() {
     }
     //调用物理地址 PhysAddr 的 floor/ceil 方法分别下/上取整获得可用的物理页号区间
     FRAME_ALLOCATOR
-        .lock()
+        .exclusive_access()
         .init(PhysAddr::from(ekernel as usize).ceil(), PhysAddr::from(MEMORY_END).floor());
 }
 
@@ -107,39 +126,15 @@ pub fn init_frame_allocator() {
 //FrameTracker被创建的时候，我们需要从FRAME_ALLOCATOR中分配一个物理页帧
 pub fn frame_alloc() -> Option<FrameTracker> {
     FRAME_ALLOCATOR
-        .lock()
+        .exclusive_access()
         .alloc()
-        .map(|ppn| FrameTracker::new(ppn))
+        .map(FrameTracker::new)
 }
 
 pub fn frame_dealloc(ppn: PhysPageNum) {
     FRAME_ALLOCATOR
-        .lock()
+        .exclusive_access()
         .dealloc(ppn);
-}
-
-pub struct FrameTracker {
-    pub ppn: PhysPageNum,
-}
-
-impl FrameTracker {
-    //由于这个物理页帧之前可能被分配过并用做其他用途，
-    //在这里直接将这个物理页帧上的所有字节清零
-    pub fn new(ppn: PhysPageNum) -> Self {
-        let bytes_array = ppn.get_bytes_array();
-        for i in bytes_array {
-            *i = 0;
-        }
-        Self { ppn }
-    }
-}
-
-//当一个FrameTracker生命周期结束被编译器回收的时候，
-//需要将它控制的物理页帧回收到FRAME_ALLOCATOR中
-impl Drop for FrameTracker {
-    fn drop(&mut self) {
-        frame_dealloc(self.ppn);
-    }
 }
 
 //从其他内核模块的视角看来，物理页帧分配的接口是调用frame_alloc函数得到一个
