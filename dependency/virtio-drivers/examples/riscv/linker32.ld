@@ -1,12 +1,7 @@
-/* Copy from bbl-ucore : https://ring00.github.io/bbl-ucore      */
-
-/* Simple linker script for the ucore kernel.
-   See the GNU ld 'info' manual ("info ld") to learn the syntax. */
-
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 
-BASE_ADDRESS = 0x80200000;
+BASE_ADDRESS = 0x80400000;
 
 SECTIONS
 {
@@ -32,6 +27,7 @@ SECTIONS
     .data : {
         sdata = .;
         *(.data .data.*)
+        *(.sdata .sdata.*)
         edata = .;
     }
 
@@ -42,8 +38,10 @@ SECTIONS
     .bss : {
         sbss = .;
         *(.bss .bss.*)
+        *(.sbss .sbss.*)
         ebss = .;
     }
 
+    . = ALIGN(4K);
     PROVIDE(end = .);
 }

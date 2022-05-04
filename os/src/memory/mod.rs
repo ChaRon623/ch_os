@@ -5,26 +5,29 @@ mod page_table;
 mod memory_set;
 use crate::println;
 
-pub use address::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
-use address::{StepByOne, VPNRange};
+pub use address::{PhysAddr, StepByOne, PhysPageNum, VirtAddr, VirtPageNum};
+use address::{ VPNRange};
 
 pub use page_table::{
 	translated_byte_buffer,
 	translated_refmut, 
 	translated_str, 
 	PageTableEntry,
+	UserBuffer, 
+	UserBufferIterator,
+	PageTable,
 };
 
 pub use frame_allocator::{
 	frame_alloc,
 	FrameTracker,
+	frame_dealloc,
 };
 
 use page_table::{
 	PTEFlags,
-	PageTable,
 };
-pub use memory_set::{MapPermission, MemorySet, KERNEL_SPACE};
+pub use memory_set::{kernel_token, MapPermission, MemorySet, KERNEL_SPACE};
 pub use memory_set::remap_test;
 
 pub fn init() {

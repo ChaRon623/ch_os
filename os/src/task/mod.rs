@@ -7,7 +7,7 @@ mod pid;
 
 mod task;
 
-use crate::loader::get_app_data_by_name;
+use crate::fs::{open_file, OpenFlags};
 use alloc::sync::Arc;
 use lazy_static::*;
 pub use manager::{fetch_task,TaskManager};
@@ -23,10 +23,11 @@ pub use processor::{
 
 //初始化初始进程的进程控制块 INITPROC
 lazy_static! {
-    ///Globle process that init user shell 
-    pub static ref INITPROC: Arc<TaskControlBlock> = Arc::new(TaskControlBlock::new(
-        get_app_data_by_name("initproc").unwrap()
-    ));
+    pub static ref INITPROC: Arc<TaskControlBlock> = Arc::new({
+        let inode = open_file("initproc", OpenFlags::RDONLY).unwrap();
+        let v = inode.read_all();
+        TaskControlBlock::new(v.as_slice())
+    });
 }
 
 ///Add init process to the manager

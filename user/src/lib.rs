@@ -3,15 +3,18 @@
 #![feature(panic_info_message)]
 #![feature(alloc_error_handler)]
 
-extern crate alloc;
 #[macro_use]
 pub mod console;
 mod lang_items;
 mod syscall;
 
+extern crate alloc;
+#[macro_use]
+extern crate bitflags;
+
 use buddy_system_allocator::LockedHeap;
 use syscall::*;
-const USER_HEAP_SIZE: usize = 16384;
+const USER_HEAP_SIZE: usize = 32768;
 
 static mut HEAP_SPACE: [u8; USER_HEAP_SIZE] = [0; USER_HEAP_SIZE];
 
@@ -63,14 +66,37 @@ pub fn waitpid(pid: usize, exit_code: &mut i32) -> isize {
     }
 }
 
-pub fn read(fd: usize, buf: &mut [u8]) -> isize {
-    sys_read(fd, buf)
-}
-
 #[linkage = "weak"]
 #[no_mangle]
 fn main() -> i32 {
     panic!("Cannot find main!");
+}
+
+//借助 bitflags! 宏我们将一个 u32 的 flags 包装为一个 OpenFlags 结构体更易使用，它的 bits 字段可以将自身转回 u32
+bitflags! {
+    pub struct OpenFlags: u32 {
+        const RDONLY = 0;
+        const WRONLY = 1 << 0;
+        const RDWR = 1 << 1;
+        const CREATE = 1 << 9;
+        const TRUNC = 1 << 10;
+    }
+}
+
+pub fn open(path: &str, flags: OpenFlags) -> isize {
+    sys_open(path, flags.bits)
+}
+
+//在打开文件，对文件完成了读写操作后，还需要关闭文件，这样才让进程释放被这个文件所占用的内核资源。s
+/// 功能：当前进程关闭一个文件。
+/// 参数：fd 表示要关闭的文件的文件描述符。
+/// 返回值：如果成功关闭则返回 0 ，否则返回 -1 。可能的出错原因：传入的文件描述符并不对应一个打开的文件。
+pub fn close(fd: usize) -> isize {
+    sys_close(fd)
+}
+
+pub fn read(fd: usize, buf: &mut [u8]) -> isize {
+    sys_read(fd, buf)
 }
 
 pub fn write(fd: usize, buf: &[u8]) -> isize {

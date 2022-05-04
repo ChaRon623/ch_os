@@ -18,8 +18,9 @@ mod board;
 #[macro_use]
 mod console;
 mod config;
+mod drivers;
+mod fs;
 mod lang_items;
-mod loader;
 pub mod memory;
 mod sbi;
 pub mod sync;
@@ -31,7 +32,6 @@ pub mod trap;
 use core::arch::global_asm;
 
 global_asm!(include_str!("entry.asm"));
-global_asm!(include_str!("link_app.S"));
 
 fn clear_bss() {
     extern "C" {
@@ -50,13 +50,13 @@ pub fn rust_main() -> ! {
     println!("Hello, world!");
     
     memory::init();
-    task::add_initproc();
-    println!("after initproc!");
     trap::init();
     trap::enable_timer_interrupt();
     println!("timer_interrupt enabled!");
     timer::set_next_trigger();
-    loader::list_apps();
+    fs::list_apps();
+    task::add_initproc();
+    println!("after initproc!");
     task::run_tasks();
     panic!("Unreachable in rust_main!");
 }

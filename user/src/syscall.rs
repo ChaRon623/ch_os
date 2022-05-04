@@ -1,4 +1,7 @@
 use core::arch::asm;
+
+const SYSCALL_OPEN: usize = 56;
+const SYSCALL_CLOSE: usize = 57;
 const SYSCALL_READ: usize = 63;
 const SYSCALL_WRITE: usize = 64;
 const SYSCALL_EXIT: usize = 93;
@@ -21,6 +24,21 @@ fn syscall(id: usize, args: [usize; 3]) -> isize {
         );
     }
     ret
+}
+
+//在读写一个常规文件之前，应用首先需要通过内核提供的 sys_open 系统调用让该文件在进程的文件描述符表中占一项，
+//并得到操作系统的返回值–文件描述符，即文件关联的表项在文件描述表中的索引值
+/// 功能：打开一个常规文件，并返回可以访问它的文件描述符。
+/// 参数：path 描述要打开的文件的文件名（简单起见，文件系统不需要支持目录，所有的文件都放在根目录 / 下），
+/// flags 描述打开文件的标志，具体含义下面给出。
+/// 返回值：如果出现了错误则返回 -1，否则返回打开常规文件的文件描述符。可能的错误原因是：文件不存在。
+/// syscall ID：56
+pub fn sys_open(path: &str, flags: u32) -> isize {
+    syscall(SYSCALL_OPEN, [path.as_ptr() as usize, flags as usize, 0])
+}
+
+pub fn sys_close(fd: usize) -> isize {
+    syscall(SYSCALL_CLOSE, [fd, 0, 0])
 }
 
 /// 功能：当前进程 fork 出来一个子进程。
